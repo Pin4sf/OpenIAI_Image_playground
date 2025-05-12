@@ -4,8 +4,8 @@ from typing import List, Optional
 from PIL import Image
 import base64
 import zipfile
-
 from openai_utils import generate_images
+from auth import login_user, logout_user, is_authenticated, get_current_user
 
 # --- UI setup ---
 st.set_page_config(
@@ -13,7 +13,32 @@ st.set_page_config(
     layout="wide",
 )
 
+# Authentication check
+if not is_authenticated():
+    st.title("Login")
+
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login")
+
+        if submit:
+            if login_user(username, password):
+                st.success("Login successful!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+    st.stop()
+
+# Main app content (only shown if authenticated)
 st.title("📸 Image Card Generator")
+
+# Add logout button in the sidebar
+with st.sidebar:
+    st.write(f"Logged in as: {get_current_user()}")
+    if st.button("Logout"):
+        logout_user()
+        st.rerun()
 
 # Initialize session state for storing generated images and selected image
 if 'generated_images' not in st.session_state:

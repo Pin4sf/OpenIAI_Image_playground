@@ -2,14 +2,16 @@ import os
 import base64
 from io import BytesIO
 from typing import List, Optional, Dict, Literal
-
+import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
 from PIL import Image
 
 # Load API key from .env
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Initialize OpenAI client with API key from secrets
+client = OpenAI(api_key=st.secrets["openai"]["api_key"])
 
 # System prompts for different GPT models
 SYSTEM_PROMPTS = {
@@ -73,7 +75,7 @@ def generate_images(
 
             # For edit-mode
             response = client.images.edit(
-                model="dall-e-2",
+                model="gpt-image-1",
                 image=processed_refs[0],  # Use the first image for editing
                 prompt=full_prompt,
                 n=n,
