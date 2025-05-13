@@ -18,7 +18,7 @@ When the user inputs a shortphrase, your job is to analyze the text input and de
 
 Always consider the full prompt exactly as above with the text inserted cleanly into "xyz" and "abc" — replacing "xyz" with the label/text the icon should feature, and "abc" with the visual graphic or symbol they mentioned. Do not include anything else in your reply.
 
-Make sure it is in a card style. The text and any graphic on the card should be flat 2D black printed on the card. the card should be slightly 3d and the colour of the card should always be #f9f1dd. Make sure the background is ALWAYS FULLY TRANSPARENT."""
+Make sure it is in a card style. The text and any graphic on the card should be flat 2D black printed on the card. the card should be slightly 3d and the colour of the card should always be #f9f1dd. Make sure the background is ALWAYS FULLY TRANSPARENT. Make sure to use Montserrat font and ALWAYS USE CAPITAL letters when generating Icon. All Icons should be in consistent style, font, and layout."""
 
 # Define valid image sizes
 ImageSize = Literal['256x256', '512x512',
