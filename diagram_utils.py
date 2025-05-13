@@ -32,23 +32,25 @@ ImageSize = Literal['256x256', '512x512',
 
 def generate_diagram(
     prompt: str,
-    variations: int = 4,
     size: ImageSize = 'auto',
-    refs: Optional[List[BytesIO]] = None
-) -> Generator[tuple[Image.Image, int, int], None, None]:
+    refs: Optional[List[BytesIO]] = None,
+    system_prompt: Optional[str] = None
+) -> Optional[Image.Image]:
     """
-    Generate diagram images for the given prompt.
-    Yields tuples of (image, current_variation, total_variations) as they are generated.
+    Generate a single diagram image for the given prompt.
 
     Args:
         prompt: The diagram prompt
-        variations: Number of variations to generate
         size: Image size
         refs: Optional reference images for editing
+        system_prompt: Optional custom system prompt to use
     """
     try:
+        # Use provided system prompt or default
+        current_system_prompt = system_prompt if system_prompt is not None else DIAGRAM_SYSTEM_PROMPT
+
         # Combine system prompt with user prompt
-        full_prompt = f"{DIAGRAM_SYSTEM_PROMPT}\n\nUser request: {prompt}"
+        full_prompt = f"{current_system_prompt}\n\nUser request: {prompt}"
 
         if refs:
             # For edit-mode, ensure the image is in the correct format
@@ -66,32 +68,24 @@ def generate_diagram(
                 model="gpt-image-1",
                 image=processed_refs[0],  # Use the first image for editing
                 prompt=full_prompt,
-                n=1,  # Generate one at a time
+                n=1,
+                size=size
+            )
+        else:
+            # For generation
+            response = client.images.generate(
+                model="gpt-image-1",
+                prompt=full_prompt,
+                n=1,
                 size=size
             )
 
-            if response and response.data:
-                for datum in response.data:
-                    if datum.b64_json:
-                        img_bytes = base64.b64decode(datum.b64_json)
-                        img = Image.open(BytesIO(img_bytes))
-                        yield img, 1, 1  # Single variation for edit mode
-        else:
-            # For generation, create variations one by one
-            for variation in range(variations):
-                response = client.images.generate(
-                    model="gpt-image-1",
-                    prompt=full_prompt,
-                    n=1,  # Generate one at a time
-                    size=size
-                )
-
-                if response and response.data:
-                    for datum in response.data:
-                        if datum.b64_json:
-                            img_bytes = base64.b64decode(datum.b64_json)
-                            img = Image.open(BytesIO(img_bytes))
-                            yield img, variation + 1, variations
+        if response and response.data:
+            for datum in response.data:
+                if datum.b64_json:
+                    img_bytes = base64.b64decode(datum.b64_json)
+                    return Image.open(BytesIO(img_bytes))
+        return None
 
     except Exception as e:
-        raise Exception(f"Error generating diagram images: {str(e)}")
+        raise Exception(f"Error generating diagram image: {str(e)}")

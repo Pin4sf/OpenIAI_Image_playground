@@ -4,8 +4,8 @@ from typing import List, Optional, Dict
 from PIL import Image
 import base64
 import zipfile
-from diagram_utils import generate_diagram
-from icon_utils import generate_icons
+from diagram_utils import generate_diagram, DIAGRAM_SYSTEM_PROMPT
+from icon_utils import generate_icons, ICON_SYSTEM_PROMPT
 from auth import login_user, logout_user, is_authenticated, get_current_user
 
 # --- UI setup ---
@@ -51,15 +51,8 @@ if 'selected_image' not in st.session_state:
     st.session_state.selected_image = None
 if 'edit_mode' not in st.session_state:
     st.session_state.edit_mode = False
-if 'generation_progress' not in st.session_state:
-    st.session_state.generation_progress = {
-        "current": 0,
-        "total": 0,
-        "current_prompt": "",
-        "current_variation": 0,
-        "total_variations": 0,
-        "type": ""  # "icon" or "diagram"
-    }
+if 'system_prompt' not in st.session_state:
+    st.session_state.system_prompt = DIAGRAM_SYSTEM_PROMPT
 
 # Model selection
 model_type = st.selectbox(
@@ -68,31 +61,38 @@ model_type = st.selectbox(
     help="Choose the type of image generator to use"
 )
 
+# Update system prompt based on model selection
+if model_type == "diagram":
+    st.session_state.system_prompt = DIAGRAM_SYSTEM_PROMPT
+else:
+    st.session_state.system_prompt = ICON_SYSTEM_PROMPT
+
 # Main content area
 main_col1, main_col2 = st.columns([2, 1])
 
 with main_col1:
-    # Variations selector (common for both generators)
-    variations = st.number_input(
-        "Number of variations",
-        min_value=1,
-        max_value=10,
-        value=4 if model_type == "diagram" else 2,
-        help=f"Choose how many variations to generate for each {'diagram' if model_type == 'diagram' else 'icon prompt'}"
+    # System prompt editing
+    st.subheader("System Prompt")
+    system_prompt = st.text_area(
+        "Edit the system prompt:",
+        value=st.session_state.system_prompt,
+        height=200,
+        help="Edit the system prompt that guides the image generation"
     )
+    st.session_state.system_prompt = system_prompt
 
     # Prompt input
     if model_type == "icon":
         prompt = st.text_area(
             "Enter your icon prompts (one per line):",
             height=120,
-            help=f"Enter multiple prompts, one per line. Each prompt will generate {variations} variations."
+            help="Enter multiple prompts, one per line. Each prompt will generate one image."
         )
     else:
         prompt = st.text_area(
             "Enter your diagram prompt:",
             height=120,
-            help=f"Enter a single prompt to generate {variations} variations."
+            help="Enter a single prompt to generate one image."
         )
 
     # Optional refs
@@ -113,171 +113,71 @@ with main_col1:
             st.error("Please enter a prompt to generate images.")
         else:
             try:
-                if model_type == "icon":
-                    # Split prompts by newline and filter out empty lines
-                    prompts = [p.strip()
-                               for p in prompt.split('\n') if p.strip()]
-
-                    # Calculate total images to be generated
-                    total_images = len(prompts) * variations
-                    st.session_state.generation_progress = {
-                        "current": 0,
-                        "total": total_images,
-                        "current_prompt": "",
-                        "current_variation": 0,
-                        "total_variations": variations,
-                        "type": "icon"
-                    }
-
-                    # Create placeholder for progress
-                    progress_placeholder = st.empty()
-                    progress_bar = progress_placeholder.progress(0)
-                    status_placeholder = st.empty()
-
-                    # Create placeholders for images
-                    image_placeholders = []
-                    cols = st.columns(2)
-                    for i in range(total_images):
-                        with cols[i % 2]:
-                            image_placeholders.append(st.empty())
-
-                    # Initialize session state for this generation
-                    st.session_state.generated_images["icons"] = {}
-
-                    # Generate images one by one
-                    for img, prompt_text, iteration, current_prompt, total_prompts in generate_icons(
-                        prompts=prompts,
-                        refs=refs if refs else None,
-                        variations=variations
-                    ):
-                        # Update progress
-                        st.session_state.generation_progress["current"] += 1
-                        st.session_state.generation_progress["current_prompt"] = prompt_text
-                        st.session_state.generation_progress["current_variation"] = iteration
-
-                        progress = st.session_state.generation_progress["current"] / \
-                            st.session_state.generation_progress["total"]
-                        progress_bar.progress(progress)
-
-                        # Update status message
-                        status_placeholder.text(
-                            f"Generating variation {iteration} of {variations} for prompt {current_prompt}/{total_prompts}: {prompt_text}"
+                with st.spinner("Generating image(s)..."):
+                    if model_type == "icon":
+                        prompts = [p.strip()
+                                   for p in prompt.split('\n') if p.strip()]
+                        cols = st.columns(2)
+                        # Append to previous images instead of overwriting
+                        if "icons" not in st.session_state.generated_images:
+                            st.session_state.generated_images["icons"] = {}
+                        for img, prompt_text in generate_icons(
+                            prompts=prompts,
+                            refs=refs if refs else None,
+                            system_prompt=st.session_state.system_prompt
+                        ):
+                            if prompt_text not in st.session_state.generated_images["icons"]:
+                                st.session_state.generated_images["icons"][prompt_text] = [
+                                ]
+                            st.session_state.generated_images["icons"][prompt_text].append(
+                                img)
+                            current_idx = len(
+                                st.session_state.generated_images["icons"][prompt_text]) - 1
+                            with cols[current_idx % 2]:
+                                st.image(img, use_container_width=True)
+                                buf = BytesIO()
+                                img.save(buf, format='PNG')
+                                st.download_button(
+                                    label='Download',
+                                    data=buf.getvalue(),
+                                    file_name=f'icon_{prompt_text}_{current_idx}.png',
+                                    mime='image/png',
+                                    key=f'download_{prompt_text}_{current_idx}'
+                                )
+                                if st.button("Edit This Image", key=f"edit_{prompt_text}_{current_idx}"):
+                                    st.session_state.selected_image = img
+                                    st.session_state.edit_mode = True
+                                    st.rerun()
+                    else:
+                        # Diagram generation
+                        img = generate_diagram(
+                            prompt=prompt,
+                            refs=refs if refs else None,
+                            system_prompt=st.session_state.system_prompt
                         )
-
-                        # Store image in session state
-                        if prompt_text not in st.session_state.generated_images["icons"]:
-                            st.session_state.generated_images["icons"][prompt_text] = [
-                            ]
-                        st.session_state.generated_images["icons"][prompt_text].append(
-                            img)
-
-                        # Display the image
-                        current_idx = len(
-                            st.session_state.generated_images["icons"][prompt_text]) - 1
-                        with cols[current_idx % 2]:
+                        if img:
+                            if "diagrams" not in st.session_state.generated_images:
+                                st.session_state.generated_images["diagrams"] = {
+                                }
+                            if prompt not in st.session_state.generated_images["diagrams"]:
+                                st.session_state.generated_images["diagrams"][prompt] = [
+                                ]
+                            st.session_state.generated_images["diagrams"][prompt].append(
+                                img)
                             st.image(img, use_container_width=True)
-
-                            # Add download button for individual image
                             buf = BytesIO()
                             img.save(buf, format='PNG')
                             st.download_button(
                                 label='Download',
                                 data=buf.getvalue(),
-                                file_name=f'icon_{prompt_text}_{iteration}.png',
+                                file_name=f'diagram_{len(st.session_state.generated_images["diagrams"][prompt])-1}.png',
                                 mime='image/png',
-                                key=f'download_{prompt_text}_{iteration}'
+                                key=f'download_diagram_{len(st.session_state.generated_images["diagrams"][prompt])-1}'
                             )
-
-                            # Add edit button
-                            if st.button("Edit This Image", key=f"edit_{prompt_text}_{iteration}"):
+                            if st.button("Edit This Image", key=f"edit_diagram_{len(st.session_state.generated_images['diagrams'][prompt])-1}"):
                                 st.session_state.selected_image = img
                                 st.session_state.edit_mode = True
                                 st.rerun()
-
-                    # Clear progress indicators after completion
-                    progress_placeholder.empty()
-                    status_placeholder.empty()
-
-                else:  # diagram generation
-                    # Calculate total images to be generated
-                    total_images = variations
-                    st.session_state.generation_progress = {
-                        "current": 0,
-                        "total": total_images,
-                        "current_prompt": prompt,
-                        "current_variation": 0,
-                        "total_variations": variations,
-                        "type": "diagram"
-                    }
-
-                    # Create placeholder for progress
-                    progress_placeholder = st.empty()
-                    progress_bar = progress_placeholder.progress(0)
-                    status_placeholder = st.empty()
-
-                    # Create placeholders for images
-                    image_placeholders = []
-                    cols = st.columns(2)
-                    for i in range(variations):
-                        with cols[i % 2]:
-                            image_placeholders.append(st.empty())
-
-                    # Initialize session state for this generation
-                    st.session_state.generated_images["diagrams"] = {}
-
-                    # Generate variations one by one
-                    for img, current_variation, total_variations in generate_diagram(
-                        prompt=prompt,
-                        variations=variations,
-                        refs=refs if refs else None
-                    ):
-                        # Update progress
-                        st.session_state.generation_progress["current"] += 1
-                        st.session_state.generation_progress["current_variation"] = current_variation
-
-                        progress = st.session_state.generation_progress["current"] / \
-                            st.session_state.generation_progress["total"]
-                        progress_bar.progress(progress)
-
-                        # Update status message
-                        status_placeholder.text(
-                            f"Generating diagram variation {current_variation} of {total_variations}"
-                        )
-
-                        # Store image in session state
-                        if prompt not in st.session_state.generated_images["diagrams"]:
-                            st.session_state.generated_images["diagrams"][prompt] = [
-                            ]
-                        st.session_state.generated_images["diagrams"][prompt].append(
-                            img)
-
-                        # Display the image
-                        current_idx = len(
-                            st.session_state.generated_images["diagrams"][prompt]) - 1
-                        with cols[current_idx % 2]:
-                            st.image(img, use_container_width=True)
-
-                            # Add download button for individual image
-                            buf = BytesIO()
-                            img.save(buf, format='PNG')
-                            st.download_button(
-                                label='Download',
-                                data=buf.getvalue(),
-                                file_name=f'diagram_{current_variation}.png',
-                                mime='image/png',
-                                key=f'download_{current_variation}'
-                            )
-
-                            # Add edit button
-                            if st.button("Edit This Image", key=f"edit_{current_variation}"):
-                                st.session_state.selected_image = img
-                                st.session_state.edit_mode = True
-                                st.rerun()
-
-                    # Clear progress indicators after completion
-                    progress_placeholder.empty()
-                    status_placeholder.empty()
-
             except Exception as e:
                 st.error(f"Error generating images: {e}")
 
@@ -285,67 +185,52 @@ with main_col2:
     # Display generated images if they exist
     if st.session_state.generated_images:
         st.subheader("Generated Images")
-
+        images_to_zip = []
         if model_type == "icon":
-            # Display icons grouped by prompt
             for prompt_text, images in st.session_state.generated_images["icons"].items():
                 st.write(f"**Prompt: {prompt_text}**")
-                for i, img in enumerate(images):
+                for idx, img in enumerate(images):
                     st.image(img, use_container_width=True)
-
-                    # Add download button for individual image
                     buf = BytesIO()
                     img.save(buf, format='PNG')
                     st.download_button(
-                        label=f'Download Variation {i+1}',
+                        label='Download',
                         data=buf.getvalue(),
-                        file_name=f'icon_{prompt_text}_{i+1}.png',
+                        file_name=f'icon_{prompt_text}_{idx+1}.png',
                         mime='image/png',
-                        key=f'download_single_{prompt_text}_{i}'
+                        key=f'download_single_{prompt_text}_{idx}'
                     )
+                    images_to_zip.append(
+                        (f'icon_{prompt_text}_{idx+1}.png', buf.getvalue()))
         else:
-            # Display diagrams grouped by prompt
             for prompt_text, images in st.session_state.generated_images["diagrams"].items():
                 st.write(f"**Prompt: {prompt_text}**")
-                for i, img in enumerate(images):
+                for idx, img in enumerate(images):
                     st.image(img, use_container_width=True)
-
-                    # Add download button for individual image
                     buf = BytesIO()
                     img.save(buf, format='PNG')
                     st.download_button(
-                        label=f'Download Variation {i+1}',
+                        label='Download',
                         data=buf.getvalue(),
-                        file_name=f'diagram_{i+1}.png',
+                        file_name=f'diagram_{idx+1}.png',
                         mime='image/png',
-                        key=f'download_single_{i}'
+                        key=f'download_single_diagram_{idx}'
                     )
-
-        # Add download all button
-        all_images_zip = BytesIO()
-        with zipfile.ZipFile(all_images_zip, 'w') as zipf:
-            if model_type == "icon":
-                for prompt_text, images in st.session_state.generated_images["icons"].items():
-                    for i, img in enumerate(images):
-                        buf = BytesIO()
-                        img.save(buf, format='PNG')
-                        zipf.writestr(
-                            f'icon_{prompt_text}_{i+1}.png', buf.getvalue())
-            else:
-                for prompt_text, images in st.session_state.generated_images["diagrams"].items():
-                    for i, img in enumerate(images):
-                        buf = BytesIO()
-                        img.save(buf, format='PNG')
-                        zipf.writestr(
-                            f'diagram_{prompt_text}_{i+1}.png', buf.getvalue())
-
-        st.download_button(
-            label="Download All Images",
-            data=all_images_zip.getvalue(),
-            file_name="all_images.zip",
-            mime="application/zip",
-            key="download_all"
-        )
+                    images_to_zip.append(
+                        (f'diagram_{idx+1}.png', buf.getvalue()))
+        # Show Download All (ZIP) if more than one image
+        if len(images_to_zip) > 1:
+            all_images_zip = BytesIO()
+            with zipfile.ZipFile(all_images_zip, 'w') as zipf:
+                for fname, data in images_to_zip:
+                    zipf.writestr(fname, data)
+            st.download_button(
+                label="Download All (ZIP)",
+                data=all_images_zip.getvalue(),
+                file_name="all_images.zip",
+                mime="application/zip",
+                key="download_all_zip"
+            )
 
 # Edit mode section
 if st.session_state.edit_mode and st.session_state.selected_image is not None:
@@ -382,20 +267,19 @@ if st.session_state.edit_mode and st.session_state.selected_image is not None:
                         edited_imgs = list(generate_icons(
                             prompts=edit_prompt,
                             refs=[img_byte_arr],
-                            variations=1
+                            system_prompt=st.session_state.system_prompt
                         ))
                         if edited_imgs:
                             # Get first image from generator
                             st.session_state.selected_image = edited_imgs[0][0]
                     else:
-                        edited_imgs = list(generate_diagram(
+                        edited_img = generate_diagram(
                             prompt=edit_prompt,
-                            variations=1,
-                            refs=[img_byte_arr]
-                        ))
-                        if edited_imgs:
-                            # Get first image from generator
-                            st.session_state.selected_image = edited_imgs[0][0]
+                            refs=[img_byte_arr],
+                            system_prompt=st.session_state.system_prompt
+                        )
+                        if edited_img:
+                            st.session_state.selected_image = edited_img
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error editing image: {e}")

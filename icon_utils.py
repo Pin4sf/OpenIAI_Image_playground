@@ -29,63 +29,64 @@ def generate_icons(
     prompts: Union[str, List[str]],
     size: ImageSize = 'auto',
     refs: Optional[List[BytesIO]] = None,
-    variations: int = 2
-) -> Generator[tuple[Image.Image, str, int, int, int], None, None]:
+    system_prompt: Optional[str] = None
+) -> Generator[tuple[Image.Image, str], None, None]:
     """
     Generate icon images for each prompt in the list.
     If a single string is provided, it will be treated as a list with one item.
-    Yields tuples of (image, prompt, iteration_number, current_prompt_index, total_prompts) as they are generated.
+    Yields tuples of (image, prompt) as they are generated.
 
     Args:
         prompts: Single prompt or list of prompts
         size: Image size
         refs: Optional reference images for editing
-        variations: Number of variations to generate per prompt
+        system_prompt: Optional custom system prompt to use
     """
     try:
         # Convert single prompt to list
         if isinstance(prompts, str):
             prompts = [prompts]
 
-        total_prompts = len(prompts)
-        for prompt_idx, prompt in enumerate(prompts):
-            for iteration in range(variations):
-                # Combine system prompt with user prompt
-                full_prompt = f"{ICON_SYSTEM_PROMPT}\n\nUser request: {prompt}"
+        # Use provided system prompt or default
+        current_system_prompt = system_prompt if system_prompt is not None else ICON_SYSTEM_PROMPT
 
-                if refs:
-                    # For edit-mode, ensure the image is in the correct format
-                    processed_refs = []
-                    for ref in refs:
-                        img = Image.open(ref)
-                        png_buffer = BytesIO()
-                        img.save(png_buffer, format='PNG')
-                        png_buffer.seek(0)
-                        processed_refs.append(png_buffer)
+        for prompt in prompts:
+            # Combine system prompt with user prompt
+            full_prompt = f"{current_system_prompt}\n\nUser request: {prompt}"
 
-                    # For edit-mode
-                    response = client.images.edit(
-                        model="gpt-image-1",
-                        image=processed_refs[0],
-                        prompt=full_prompt,
-                        n=1,
-                        size=size
-                    )
-                else:
-                    # For generation
-                    response = client.images.generate(
-                        model="gpt-image-1",
-                        prompt=full_prompt,
-                        n=1,
-                        size=size
-                    )
+            if refs:
+                # For edit-mode, ensure the image is in the correct format
+                processed_refs = []
+                for ref in refs:
+                    img = Image.open(ref)
+                    png_buffer = BytesIO()
+                    img.save(png_buffer, format='PNG')
+                    png_buffer.seek(0)
+                    processed_refs.append(png_buffer)
 
-                if response and response.data:
-                    for datum in response.data:
-                        if datum.b64_json:
-                            img_bytes = base64.b64decode(datum.b64_json)
-                            img = Image.open(BytesIO(img_bytes))
-                            yield img, prompt, iteration + 1, prompt_idx + 1, total_prompts
+                # For edit-mode
+                response = client.images.edit(
+                    model="gpt-image-1",
+                    image=processed_refs[0],
+                    prompt=full_prompt,
+                    n=1,
+                    size=size
+                )
+            else:
+                # For generation
+                response = client.images.generate(
+                    model="gpt-image-1",
+                    prompt=full_prompt,
+                    n=1,
+                    size=size
+                )
+
+            if response and response.data:
+                for datum in response.data:
+                    if datum.b64_json:
+                        img_bytes = base64.b64decode(datum.b64_json)
+                        img = Image.open(BytesIO(img_bytes))
+                        yield img, prompt
 
     except Exception as e:
         raise Exception(f"Error generating icon images: {str(e)}")
